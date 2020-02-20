@@ -1,1 +1,2 @@
-./assets/datasets/*
+text_classification/assets/datasets/**
+!text_classification/assets/datasets/**/

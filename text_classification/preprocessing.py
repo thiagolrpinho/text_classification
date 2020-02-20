@@ -1,6 +1,7 @@
 import pdftotext
 import os
 import re
+import pandas as pd
 from typing import List
 
 DATASETS_RELATIVE_PATH = "./assets/datasets/"
@@ -21,8 +22,6 @@ def open_document(
 
     filename = re.sub(".pdf", "", filename)
     if not os.path.isfile(foldername + filename + ".pdf"):
-        print(foldername + filename + ".pdf")
-        print("Teu_pai")
         return []
 
     if not os.path.exists(foldername + "txts/"):
@@ -52,5 +51,24 @@ def open_document(
     return document_pages
 
 
-def document_to_dataframe(document_pages: List[str], document_name: str):
-    return False
+def document_pages_to_dataframe(document_pages: List[str], document_name: str):
+    ''' Receives a list of document_pages and convert the pages of
+        each document in a row with the  content of the page and
+        the document identifier as columns.
+        :args: 
+        :returns: dataframe containing all pages as rows
+    '''
+    if not document_pages or not document_name:
+        return pd.DataFrame()
+
+    document_pages_dicts = []
+    for page in document_pages:
+        single_page_dict = {
+            "page_content": page,
+            "filename": document_name
+        }
+        document_pages_dicts.append(single_page_dict)
+
+    df_document_pages = pd.DataFrame(document_pages_dicts)
+
+    return df_document_pages

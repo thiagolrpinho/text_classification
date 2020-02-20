@@ -1,10 +1,13 @@
 import pdftotext
 import os
 import re
+from typing import List
 
 DATASETS_RELATIVE_PATH = "./assets/datasets/"
 
-def open_document(filename: str, foldername: str = DATASETS_RELATIVE_PATH):
+
+def open_document(
+        filename: str, foldername: str = DATASETS_RELATIVE_PATH) -> List[str]:
     '''
     Open a pdf document alterady OCRized, stores a copy of the content as
     a text file(.txt) inside a folder "./txts/" in the same directory as
@@ -47,3 +50,7 @@ def open_document(filename: str, foldername: str = DATASETS_RELATIVE_PATH):
             document_pages.pop()
 
     return document_pages
+
+
+def document_to_dataframe(document_pages: List[str], document_name: str):
+    return False

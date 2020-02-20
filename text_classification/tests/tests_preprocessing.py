@@ -8,7 +8,7 @@
 
 import pytest
 import helper_tests
-from preprocessing import open_document
+from preprocessing import open_document, document_to_dataframe
 
 
 @pytest.mark.parametrize('input_and_output', [
@@ -29,5 +29,17 @@ def test_pdf_to_text(input_and_output):
 
     assert expected_output == found_page
     
+@pytest.mark.parametrize('input_and_output', [
+    ("45198473.pdf", True),
+    ("invalido.pdf", False),
+    ("48276987.pdf", True)])
+def test_document_to_dataframe(input_and_output):
+    input_list_string = input_and_output[0]
+    expected_output = input_and_output[1]
+    document_pages = open_document(
+        input_list_string, helper_tests.TESTS_SAMPLES_RELATIVE_PATH)
 
+    df_document_pages = document_to_dataframe(document_pages, input_and_output)
+
+    assert expected_output == df_document_pages
 

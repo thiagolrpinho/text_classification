@@ -20,4 +20,14 @@ def test_pdf_to_text(input_and_output):
     expected_output = input_and_output[1]
     extracted_string = open_document(
         input_list_string, helper_tests.TESTS_SAMPLES_RELATIVE_PATH)
-    assert expected_output == extracted_string
+    found_page = len(extracted_string) > 0
+
+    assert expected_output == found_page
+    ''' Then we test if the text file importation is having any problem '''
+    extracted_string = open_document(
+        input_list_string, helper_tests.TESTS_SAMPLES_RELATIVE_PATH)
+
+    assert expected_output == found_page
+    
+
+

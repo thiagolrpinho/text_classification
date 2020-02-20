@@ -18,5 +18,6 @@ from preprocessing import open_document
 def test_pdf_to_text(input_and_output):
     input_list_string = input_and_output[0]
     expected_output = input_and_output[1]
-    extracted_string = open_document(input_list_string)
+    extracted_string = open_document(
+        input_list_string, helper_tests.TESTS_SAMPLES_RELATIVE_PATH)
     assert expected_output == extracted_string

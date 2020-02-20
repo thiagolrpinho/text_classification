@@ -1,6 +1,7 @@
 from os import path, sys, getcwd
 
 TEST_MODE = True
+TESTS_SAMPLES_RELATIVE_PATH = "./tests/sample/"
 
 
 def change_execution_directory(relative_path_directory_to_execute_from: str):

@@ -2,8 +2,9 @@ import pdftotext
 import os
 import re
 
+DATASETS_RELATIVE_PATH = "./assets/datasets/"
 
-def open_document(filename: str, foldername: str = "assets/datasets"):
+def open_document(filename: str, foldername: str = DATASETS_RELATIVE_PATH):
     '''
     Open a pdf document alterady OCRized, stores a copy of the content as
     a text file(.txt) inside a folder "./txts/" in the same directory as
@@ -16,8 +17,9 @@ def open_document(filename: str, foldername: str = "assets/datasets"):
         return []
 
     filename = re.sub(".pdf", "", filename)
-
     if not os.path.isfile(foldername + filename + ".pdf"):
+        print(foldername + filename + ".pdf")
+        print("Teu_pai")
         return []
 
     if not os.path.exists(foldername + "txts/"):
@@ -34,9 +36,7 @@ def open_document(filename: str, foldername: str = "assets/datasets"):
 
         with open(text_filename, "w") as text_file:
             for page in untreated_document:
-                print(
-                    "{}"+end_of_page_token.format(page.upper()),
-                    file=text_file)
+                print(page.upper() + end_of_page_token, file=text_file)
                 document_pages.append(page.upper())
     else:
         with open(text_filename, "r") as text_file:

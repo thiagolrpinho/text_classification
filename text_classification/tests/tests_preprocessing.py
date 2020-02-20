@@ -12,9 +12,11 @@ from preprocessing import open_document, document_pages_to_dataframe
 
 
 @pytest.mark.parametrize('input_and_output', [
-    ("45198473.pdf", True),
-    ("invalido.pdf", False),
-    ("48276987.pdf", True)])
+    (["45198473.pdf"], True),
+    (["invalido.pdf"], False),
+    (["45198473.pdf", "48276987.pdf"], True),
+    (["45198473.pdf", "invalido.pdf"], True),
+    (["48276987.pdf"], True)])
 def test_pdf_to_text(input_and_output):
     filename = input_and_output[0]
     expected_output = input_and_output[1]
@@ -30,9 +32,11 @@ def test_pdf_to_text(input_and_output):
     assert expected_output == found_page
     
 @pytest.mark.parametrize('input_and_output', [
-    ("45198473.pdf", True),
-    ("invalido.pdf", False),
-    ("48276987.pdf", True)])
+    (["45198473.pdf"], True),
+    (["invalido.pdf"], False),
+    (["45198473.pdf", "48276987.pdf"], True),
+    (["45198473.pdf", "invalido.pdf"], True),
+    (["48276987.pdf"], True)])
 def test_document_pages_to_dataframe(input_and_output):
     input_filename = input_and_output[0]
     expected_output = input_and_output[1]

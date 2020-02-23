@@ -84,3 +84,4 @@ def documents_pages_to_dataframe(documents: List[Tuple[str, List[str]]]):
     df_documents_pages = pd.DataFrame(documents_dicts)
 
     return df_documents_pages
+

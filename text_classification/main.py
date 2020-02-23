@@ -93,8 +93,8 @@ TEXT_VARIABLE = 'TITLE'
 from sklearn.model_selection import train_test_split
 print(df_ribon_news.columns)
 train, test = train_test_split(df_ribon_news[[TARGET_VARIABLE, TEXT_VARIABLE]], 
-                                                      test_size=0.33,
-                                                          random_state=42)
+                                                    test_size=0.33,
+                                                        random_state=42)
 print('Research title sample:', train[TEXT_VARIABLE].iloc[0])
 print('Conference of this paper:', train[TARGET_VARIABLE].iloc[0])
 print('Training Data Shape:', train.shape)
@@ -240,3 +240,85 @@ for i in range(len(train1)):
 from sklearn import metrics
 print(metrics.classification_report(labelsTest1, preds, 
                                     target_names=df_ribon_news[TARGET_VARIABLE].unique()))
+
+
+import numpy as np
+import pandas as pd
+import gensim
+import gensim.corpora as corpora
+from gensim.utils import simple_preprocess
+from gensim.models import CoherenceModel
+
+import spacy
+from spacy.lemmatizer import Lemmatizer
+from spacy.lang.en.stop_words import STOP_WORDS
+import en_core_web_lg
+
+from tqdm import tqdm_notebook as tqdm
+from pprint import pprint
+
+doc_list = []
+# Iterates through each article in the corpus.
+for doc in tqdm(newest_doc):
+    # Passes that article through the pipeline and adds to a new list.
+    pr = nlp(doc)
+    doc_list.append(pr)
+
+def lemmatizer(doc):
+    # This takes in a doc of tokens from the NER and lemmatizes them.
+    # Pronouns (like "I" and "you" get lemmatized to '-PRON-',
+    # so I'm removing those.
+    doc = [token.lemma_ for token in doc if token.lemma_ != '-PRON-']
+    doc = u' '.join(doc)
+    return nlp.make_doc(doc)
+    
+def remove_stopwords(doc):
+    # This will remove stopwords and punctuation.
+    # Use token.text to return strings, which we'll need for Gensim.
+    doc = [token.text for token in doc if token.is_stop != True and token.is_punct != True]
+    return doc
+
+# The add_pipe function appends our functions to the default pipeline.
+nlp.add_pipe(lemmatizer,name='lemmatizer',after='ner')
+nlp.add_pipe(remove_stopwords, name="stopwords", last=True)
+
+
+lda_model = gensim.models.ldamodel.LdaModel(corpus=corpus, id2word=words,
+                                        num_topics=10, random_state=2,
+                                        update_every=1, passes=10,
+                                        alpha='auto', per_word_topics=True)
+
+import pyLDAvis.gensim
+# turn on automatic rendering of visualizations
+pyLDAvis.enable_notebook()
+
+pyLDAvis.gensim.prepare(lda_model, corpus, words)
+
+
+from nltk.corpus import stopwords
+stop_words = stopwords.words('english')
+stop_words.extend(['come','order','try','go','get','make','drink','plate','dish','restaurant','place',
+                  'would','really','like','great','service','came','got'])
+
+def remove_stopwords(texts):
+    return [[word for word in simple_preprocess(str(doc)) if word not in stop_words] for doc in texts]
+
+def bigrams(words, bi_min=15, tri_min=10):
+    bigram = gensim.models.Phrases(words, min_count = bi_min)
+    bigram_mod = gensim.models.phrases.Phraser(bigram)
+    return bigram_mod
+    
+def get_corpus(df, text_label, target_label):
+    df[text_label] = str(df.text_label)
+    words = list(sent_to_words(df.text_label))
+    words = remove_stopwords(words)
+    bigram_mod = bigrams(words)
+    bigram = [bigram_mod[word] for word in words]
+    id2word = gensim.corpora.Dictionary(bigram)
+    id2word.filter_extremes(no_below=10, no_above=0.35)
+    id2word.compactify()
+    corpus = [id2word.doc2bow(text_label) for text_label in bigram]
+    return corpus, id2word, bigram
+
+train_corpus, train_id2word, bigram_train = get_corpus(df_ribon_news)
+

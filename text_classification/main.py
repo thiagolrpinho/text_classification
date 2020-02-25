@@ -4,100 +4,30 @@ Created on Fri 21 2020
 @author: Thiago Pinho
 """
 
-from sklearn.svm import LinearSVC
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import cross_val_score
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.feature_extraction.text import TfidfTransformer
-from sklearn.model_selection import cross_val_score
 from sklearn.linear_model import SGDClassifier
+from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import Pipeline
-from sklearn.base import TransformerMixin
-from sklearn import metrics
 from sklearn.metrics import accuracy_score
+import spacy
 from spacy.lang.pt import Portuguese
-from nltk.corpus import stopwords
+from spacy.lang.pt.stop_words import STOP_WORDS
 import pandas as pd
 import numpy as np
-import xlsxwriter
-import spacy
 import seaborn as sns
 import matplotlib.pyplot as plt
-import string
-import pyLDAvis.gensim
 from tqdm.notebook import tqdm
 
-
-class CleanTextTransformer(TransformerMixin):
-    def transform(self, X, **transform_params):
-        return [clean_text(text) for text in X]
-
-    def fit(self, X, y=None, **fit_params):
-        return self
-
-
-def get_params(self, deep=True):
-    return {}
-
-
-def clean_text(text):
-    text = str(text)
-    text = text.strip().replace("\n", " ").replace("\r", " ")
-    return text
-
-
-def tokenize_text(sample):
-    tokens = parser(sample)
-    lemmas = []
-    for tok in tokens:
-        lemmas.append(
-            tok.lemma_.lower().strip()
-            if tok.lemma_ != "-PRON-" else tok.lower_)
-    tokens = lemmas
-    tokens = [tok for tok in tokens if tok not in STOPLIST]
-    tokens = [tok for tok in tokens if tok not in SYMBOLS]
-    return tokens
-
-
-def print_n_most_informative(vectorizer, clf, N):
-    feature_names = vectorizer.get_feature_names()
-    coefs_with_fns = sorted(zip(clf.coef_[0], feature_names))
-    topClass1 = coefs_with_fns[:N]
-    topClass2 = coefs_with_fns[:-(N + 1):-1]
-    print("Class 1 best: ")
-    for feat in topClass1:
-        print(feat)
-    print("Class 2 best: ")
-    for feat in topClass2:
-        print(feat)
-
-
-    def lemmatizer(doc):
-        """  This takes in a doc of tokens from the NER and lemmatizes them.  
-            Pronouns (like "I" and "you" get lemmatized to "-PRON-",
-            so I"m removing those.
-        """
-        doc = [token.lemma_ for token in doc if token.lemma_ != "-PRON-"]
-        doc = u" ".join(doc)
-        return nlp.make_doc(doc)
-
-
-    def remove_stopwords(doc):
-        """  This will remove stopwords and punctuation. 
-            Use token.text to return strings, which we"ll need for Gensim.
-        """
-        doc = [token.text for token in doc if token.is_stop != True and token.is_punct != True]
-        return doc
 
 VECTOR_MODEL_NAME = "pt_core_news_sm"
 RELATIVE_PATH_TO_FOLDER = "./assets/datasets/ribon/"
 DATA_FILENAME = "Feeds_Label"
 parser = Portuguese()
-STOPLIST = set(stopwords.words("portuguese")).add(["a", "o", "A", "O"])
-SYMBOLS = " ".join(string.punctuation).split(" ") + ["-", "...", "”", "”"]
+nlp = spacy.load(VECTOR_MODEL_NAME)
 TARGET_VARIABLE = "LABEL_TRAIN"
 TEXT_VARIABLE = "TITLE"
-print(STOPLIST)
-print(SYMBOLS)
 
 """  load the dataset """
 relative_path_file = RELATIVE_PATH_TO_FOLDER + DATA_FILENAME + ".csv"
@@ -111,10 +41,12 @@ df_ribon_news[TARGET_VARIABLE] = df_ribon_news[TARGET_VARIABLE].str.upper()
 print(df_ribon_news.head())
 
 """  Let"s see how the labels are distributed """
-fig = plt.figure(figsize=(16, 8))
+data_labels_count = df_ribon_news[TARGET_VARIABLE].value_counts()
+data_labels = data_labels_count.index
+fig = plt.figure(figsize=(20, 8))
 sns.barplot(
-    x=df_ribon_news[TARGET_VARIABLE].unique(),
-    y=df_ribon_news[TARGET_VARIABLE].value_counts())
+    x=data_labels_count.index,
+    y=data_labels_count)
 plt.show()
 
 """  Let"s store the data """
@@ -127,11 +59,10 @@ df_ribon_news.to_excel(excel_filename)
 df_ribon_news_treated = pd.read_excel(excel_filename, index_col=0)
 print(df_ribon_news_treated.head())
 
-for label in df_ribon_news_treated[TARGET_VARIABLE].unique():
-    print(
-        label + ": ",
-        len(df_ribon_news_treated[
-            df_ribon_news_treated[TARGET_VARIABLE] == label]))
+data_labels_with_count = df_ribon_news_treated[TARGET_VARIABLE].value_counts()
+data_labels = data_labels_with_count.index
+for label in tdqm(data_labels):
+    print(label + ": ", data_labels_with_count[label])
 
 """ As we have two text variables CONTENT and TITLE.
     we can use both of then to improve predictions
@@ -153,130 +84,136 @@ excel_second_filename = RELATIVE_PATH_TO_FOLDER + DATA_FILENAME +\
 df_first_ribon_news_data.to_excel(excel_first_filename)
 df_second_ribon_news_data.to_excel(excel_second_filename)
 
+''' One possible approach is to group up under represented labels and further
+    analysis in other pipeline. We analysed the data and found out 
+    that some of the labels are under 40 representations which is pretty low.
+'''
+data_labels_count = df_ribon_news_treated[TARGET_VARIABLE].value_counts()
+data_labels = data_labels_count.index
+under_represented_labels = [
+    scarse_label
+    for scarse_label in tdqm(data_labels)
+    if data_labels_count[scarse_label] <= 40]
+print(under_represented_labels)
+
+''' Now we have found which ones are under represented we'll create a new
+    DataFrame changing the under represented to OUTROS '''
+GROUP_TARGET_LABEL = 'OUTROS'
+df_ribon_news_grouped = df_ribon_news_treated.replace(
+    {TARGET_VARIABLE: under_represented_labels}, GROUP_TARGET_LABEL)
+print(df_ribon_news_grouped[TARGET_VARIABLE].value_counts())
+
+
+"""  Let"s see how the labels are distributed """
+data_labels_count = df_ribon_news_grouped[TARGET_VARIABLE].value_counts()
+data_labels = data_labels_count.index
+fig = plt.figure(figsize=(20, 8))
+sns.barplot(
+    x=data_labels_count.index,
+    y=data_labels_count)
+plt.show()
+
+""" As we have two text variables CONTENT and TITLE.
+    we can use both of then to improve predictions
+"""
+first_pipeline_text_variable = "CONTENT"
+second_pipeline_text_variable = "TITLE"
+
+df_first_ribon_news_data_grouped = df_ribon_news_grouped[
+    [first_pipeline_text_variable, TARGET_VARIABLE]]
+df_second_ribon_news_data_grouped = df_ribon_news_grouped[
+    [second_pipeline_text_variable, TARGET_VARIABLE]]
+
+"""  Let"s store the data """
+excel_first_filename = RELATIVE_PATH_TO_FOLDER + DATA_FILENAME +\
+    "_first_data_grouped.xlsx"
+excel_second_filename = RELATIVE_PATH_TO_FOLDER + DATA_FILENAME +\
+    "_second_data_grouped.xlsx"
+
+df_first_ribon_news_data_grouped.to_excel(excel_first_filename)
+df_second_ribon_news_data_grouped.to_excel(excel_second_filename)
+
 """  We then load the data for stability """
 df_first_data = pd.read_excel(excel_first_filename, index_col=0)
 df_second_data = pd.read_excel(excel_second_filename, index_col=0)
 print(df_first_data.head())
 print(df_second_data.head())
 
-"""  Let"s create a train and test sample """
-"""  for TITLE -> TRAIN_LABEL analysis """
-y_variable = "LABEL_TRAIN"
-X_variable = first_pipeline_text_variable
-df_X_data = df_first_data[X_variable]
-df_y_data = df_first_data[y_variable]
+''' Let's do the pipeline step by step to be more explicit '''
+''' Text Parsing
+    This part is reponsible for clean the text from symbols and possible
+    OCR noise. It's also responsible to find sentences,
+    tokenize the text, identifiy(if needed) multi-word terms, find POS
+    (Part of Speech), drop unwanted semmantics and stopwords, lemmatize the
+    rest.
+    - Sentencer
+    - Tokenizer
+    - Parser
+    - Lemmatizer
+'''
+raw_text_data = df_first_data[first_pipeline_text_variable].to_list()
 
-X_train, X_test, y_train, y_test = train_test_split(
-    df_X_data.values,
-    df_y_data.values,
-    test_size=0.33, random_state=42)
-print("One sample of the " + X_variable + " column: ", X_train[0])
-print("This sample respective " + y_variable + "column: ", y_train[0])
-print("Training Data Shape:", X_train.shape)
-print("Testing Data Shape:", y_train.shape)
+preprocessed_text_data = [str(raw_text) for raw_text in tqdm(raw_text_data)]
+''' Not all variables are being undestood as strings so we have to force it'''
 
-vectorizer = CountVectorizer(tokenizer=tokenize_text, ngram_range=(1, 1))
-clf = LinearSVC()
+nlp = spacy.load(VECTOR_MODEL_NAME)
+''' We an already trained model to process portuguese '''
 
-pipe = Pipeline(
-    [("cleanText", CleanTextTransformer()),
-        ("vectorizer", vectorizer), ("clf", clf)])
-"""  data """
-train1 = X_train.tolist()
-labelsTrain1 = y_train.tolist()
-test1 = X_test.tolist()
-labelsTest1 = y_test.tolist()
-"""  train """
-pipe.fit(train1, labelsTrain1)
-"""  test """
-preds = pipe.predict(test1)
-print("accuracy:", accuracy_score(labelsTest1, preds))
-print("Top 10 features used to predict: ")
-print_n_most_informative(vectorizer, clf, 10)
+sentencizer = nlp.create_pipe('sentencizer')
+''' Create the pipeline 'sentencizer' component '''
 
-print(
-    metrics.classification_report(
-        labelsTest1,
-        preds,
-        target_names=df_first_data[y_variable].unique()))
+nlp.add_pipe(sentencizer, before='parser')
+''' We then add the component to the pipeline '''
+print(nlp.pipe_names)
 
-"""  Let"s create a train and test sample
-    for TITLE -> TRAIN_LABEL analysis
-"""
-y_variable = "LABEL_TRAIN"
-X_variable = second_pipeline_text_variable
-df_X_data = df_second_data[X_variable]
-df_y_data = df_second_data[y_variable]
+processed_text_data = []
+lemmatized_doc = []
+for row in tqdm(preprocessed_text_data):
+    doc = nlp(row)
+    processed_text_data.append(doc)
+    lemmatized_doc.append(str([word.lemma_ for word in doc if not word.is_stop]))
 
-X_train, X_test, y_train, y_test = train_test_split(
-    df_X_data.values,
-    df_y_data.values,
-    test_size=0.33, random_state=42)
-print("One sample of the " + X_variable + " column: ", X_train[0])
-print("This sample respective " + y_variable + "column: ", y_train[0])
-print("Training Data Shape:", X_train.shape)
-print("Testing Data Shape:", y_train.shape)
-
-vectorizer = CountVectorizer(tokenizer=tokenize_text, ngram_range=(1, 1))
-tf_transformer = TfidfTransformer(use_idf=False)
-clf = LinearSVC()
-
-pipe = Pipeline(
-    [("clean_text", CleanTextTransformer()),
-        ("vectorizer", vectorizer),
-        ("tfidf", tf_transformer)
-        ("clf", clf)])
-"""  data """
-train1 = X_train.tolist()
-labelsTrain1 = y_train.tolist()
-test1 = X_test.tolist()
-labelsTest1 = y_test.tolist()
-"""  train """
-pipe.fit(train1, labelsTrain1)
-"""  test """
-preds = pipe.predict(test1)
-print("accuracy:", accuracy_score(labelsTest1, preds))
-print("Top 10 features used to predict: ")
-print_n_most_informative(vectorizer, clf, 10)
-
-print(
-    metrics.classification_report(
-        labelsTest1,
-        preds,
-        target_names=df_second_data[y_variable].unique()))
-
-"""  Now we found that which text variable is more descriptive let's decide which model
-     have a better perfomance with this kind of data 
-"""
-y_variable = "LABEL_TRAIN"
-X_variable = first_pipeline_text_variable
-df_X_data = df_first_data[X_variable]
-df_y_data = df_first_data[y_variable]
-
-vectorizer = CountVectorizer(tokenizer=tokenize_text, ngram_range=(1, 1))
-tf_transformer = TfidfTransformer(use_idf=True)
-clf = CalibratedClassifierCV()
-
-first_pipe = Pipeline(
-    [("clean_text", CleanTextTransformer()),
-        ("vectorizer", vectorizer),
-        ("tfidf", tf_transformer),
-        ("clf", clf)])
-
-scores = cross_val_score(first_pipe, df_X_data, df_y_data, cv=5)
-print("Mean model scores for first:", scores.mean())
-
-svm = SGDClassifier(loss='hinge', penalty='l2',
-                           alpha=1e-3, random_state=42,
-                           max_iter=10, tol=None)
-
-second_pipe = Pipeline(
-    [("clean_text", CleanTextTransformer()),
-        ("vectorizer", vectorizer),
-        ("tfidf", tf_transformer),
-        ("svm", svm)])
-
-scores = cross_val_score(second_pipe, df_X_data, df_y_data, cv=5)
-print("Mean model scores for first:", scores.mean())
+df_processed_data = pd.DataFrame()
+df_processed_data['preprocessed_text_data'] = preprocessed_text_data
+df_processed_data['processed_text_data'] = processed_text_data
+df_processed_data['lemmatized_doc'] = lemmatized_doc
+print(df_processed_data)
 
 
+"""  Let"s store the data """
+excel_filename = RELATIVE_PATH_TO_FOLDER + DATA_FILENAME +\
+    "_parsed_data.xlsx"
+
+df_processed_data.to_excel(excel_filename)
+
+"""  We then load the data for stability """
+df_processed_data = pd.read_excel(excel_filename, index_col=0)
+print(df_processed_data.head())
+
+''' Best parameter (CV score=0.535):
+{'clf__alpha': 1e-05, 'clf__max_iter': 80, 'clf__penalty': 'l2', 'tfidf__norm': 'l1',
+'tfidf__use_idf': True, 'vect__max_df': 0.5, 'vect__max_features': None, 'vect__ngram_range': (1, 2)}
+'''
+''' Text Filter
+    This part is responsible to give weights to important tokens and remove
+    weight for unwanted ones or those who can be misguiding.
+    - Frequency Counter
+    - Id-IdF Counter
+'''
+vect = CountVectorizer(max_features = None, max_df=0.5, vect=ngram_range(1, 2))
+tfidf = TfidfTransformer(norm= 'l1', use_idf='True')
+
+''' Text Topics
+    This part will be used to generate unsupervisioned topics using the tokens
+    from text filter. Those topics will later be used to generate rules for the
+    model.
+'''
+
+
+''' Rule Builder
+
+'''
+
+''' Model Train and Evaluation
+
+'''

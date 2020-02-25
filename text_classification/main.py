@@ -7,12 +7,14 @@ Created on Fri 21 2020
 from sklearn.svm import LinearSVC
 from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.feature_extraction.text import TfidfTransformer
+from sklearn.model_selection import cross_val_score
+from sklearn.linear_model import SGDClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.base import TransformerMixin
 from sklearn import metrics
 from sklearn.metrics import accuracy_score
 from spacy.lang.pt import Portuguese
-from collections import Counter
 from nltk.corpus import stopwords
 import pandas as pd
 import numpy as np
@@ -23,7 +25,6 @@ import matplotlib.pyplot as plt
 import string
 import pyLDAvis.gensim
 from tqdm.notebook import tqdm
-from pprint import pprint
 
 
 class CleanTextTransformer(TransformerMixin):
@@ -41,7 +42,6 @@ def get_params(self, deep=True):
 def clean_text(text):
     text = str(text)
     text = text.strip().replace("\n", " ").replace("\r", " ")
-    text = text.lower()
     return text
 
 
@@ -218,11 +218,14 @@ print("Training Data Shape:", X_train.shape)
 print("Testing Data Shape:", y_train.shape)
 
 vectorizer = CountVectorizer(tokenizer=tokenize_text, ngram_range=(1, 1))
+tf_transformer = TfidfTransformer(use_idf=False)
 clf = LinearSVC()
 
 pipe = Pipeline(
     [("clean_text", CleanTextTransformer()),
-        ("vectorizer", vectorizer), ("clf", clf)])
+        ("vectorizer", vectorizer),
+        ("tfidf", tf_transformer)
+        ("clf", clf)])
 """  data """
 train1 = X_train.tolist()
 labelsTrain1 = y_train.tolist()
@@ -242,11 +245,38 @@ print(
         preds,
         target_names=df_second_data[y_variable].unique()))
 
-"""  Let"s try using another pipeline  """
-"""  Load the large model to get the vectors """
-nlp = spacy.load(VECTOR_MODEL_NAME)
-"""  The add_pipe function appends our functions to the default pipeline. """
-nlp.add_pipe(lemmatizer, name="lemmatizer", after="ner")
-nlp.add_pipe(remove_stopwords, name="stopwords", last=True)
+"""  Now we found that which text variable is more descriptive let's decide which model
+     have a better perfomance with this kind of data 
+"""
+y_variable = "LABEL_TRAIN"
+X_variable = first_pipeline_text_variable
+df_X_data = df_first_data[X_variable]
+df_y_data = df_first_data[y_variable]
 
-print(nlp.pipe_names)
+vectorizer = CountVectorizer(tokenizer=tokenize_text, ngram_range=(1, 1))
+tf_transformer = TfidfTransformer(use_idf=True)
+clf = CalibratedClassifierCV()
+
+first_pipe = Pipeline(
+    [("clean_text", CleanTextTransformer()),
+        ("vectorizer", vectorizer),
+        ("tfidf", tf_transformer),
+        ("clf", clf)])
+
+scores = cross_val_score(first_pipe, df_X_data, df_y_data, cv=5)
+print("Mean model scores for first:", scores.mean())
+
+svm = SGDClassifier(loss='hinge', penalty='l2',
+                           alpha=1e-3, random_state=42,
+                           max_iter=10, tol=None)
+
+second_pipe = Pipeline(
+    [("clean_text", CleanTextTransformer()),
+        ("vectorizer", vectorizer),
+        ("tfidf", tf_transformer),
+        ("svm", svm)])
+
+scores = cross_val_score(second_pipe, df_X_data, df_y_data, cv=5)
+print("Mean model scores for first:", scores.mean())
+
+

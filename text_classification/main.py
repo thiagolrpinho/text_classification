@@ -263,8 +263,7 @@ pipeline.fit(train1, labelsTrain1)
 """  test """
 preds = pipeline.predict(test1)
 print("accuracy:", accuracy_score(labelsTest1, preds))
-print(
-    classification_report(
+print(classification_report(
         labelsTest1,
         preds,
         target_names=df_processed_data[TARGET_VARIABLE].unique()))

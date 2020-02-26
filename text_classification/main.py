@@ -4,7 +4,7 @@ Created on Fri 21 2020
 @author: Thiago Pinho
 """
 
-from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import cross_val_score, train_test_split
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.feature_extraction.text import TfidfTransformer
 from sklearn.linear_model import SGDClassifier
@@ -24,7 +24,6 @@ from tqdm.notebook import tqdm
 VECTOR_MODEL_NAME = "pt_core_news_sm"
 RELATIVE_PATH_TO_FOLDER = "./assets/datasets/ribon/"
 DATA_FILENAME = "Feeds_Label"
-parser = Portuguese()
 nlp = spacy.load(VECTOR_MODEL_NAME)
 TARGET_VARIABLE = "LABEL_TRAIN"
 TEXT_VARIABLE = "TITLE"
@@ -61,7 +60,7 @@ print(df_ribon_news_treated.head())
 
 data_labels_with_count = df_ribon_news_treated[TARGET_VARIABLE].value_counts()
 data_labels = data_labels_with_count.index
-for label in tdqm(data_labels):
+for label in tqdm(data_labels):
     print(label + ": ", data_labels_with_count[label])
 
 """ As we have two text variables CONTENT and TITLE.
@@ -92,7 +91,7 @@ data_labels_count = df_ribon_news_treated[TARGET_VARIABLE].value_counts()
 data_labels = data_labels_count.index
 under_represented_labels = [
     scarse_label
-    for scarse_label in tdqm(data_labels)
+    for scarse_label in tqdm(data_labels)
     if data_labels_count[scarse_label] <= 40]
 print(under_represented_labels)
 
@@ -174,9 +173,10 @@ for row in tqdm(preprocessed_text_data):
     lemmatized_doc.append(str([word.lemma_ for word in doc if not word.is_stop]))
 
 df_processed_data = pd.DataFrame()
-df_processed_data['preprocessed_text_data'] = preprocessed_text_data
-df_processed_data['processed_text_data'] = processed_text_data
-df_processed_data['lemmatized_doc'] = lemmatized_doc
+df_processed_data['PREPROCESSED_TEXT_DATA'] = preprocessed_text_data
+df_processed_data['PROCESSED_TEXT_DATA'] = processed_text_data
+df_processed_data['LEMMATIZED_DOC'] = lemmatized_doc
+df_processed_data[TARGET_VARIABLE] = df_first_data[TARGET_VARIABLE]
 print(df_processed_data)
 
 
@@ -190,7 +190,7 @@ df_processed_data.to_excel(excel_filename)
 df_processed_data = pd.read_excel(excel_filename, index_col=0)
 print(df_processed_data.head())
 
-''' Best parameter (CV score=0.535):
+''' Best parameter using GridSearch (CV score=0.535):
 {'clf__alpha': 1e-05, 'clf__max_iter': 80, 'clf__penalty': 'l2', 'tfidf__norm': 'l1',
 'tfidf__use_idf': True, 'vect__max_df': 0.5, 'vect__max_features': None, 'vect__ngram_range': (1, 2)}
 '''
@@ -200,8 +200,16 @@ print(df_processed_data.head())
     - Frequency Counter
     - Id-IdF Counter
 '''
-vect = CountVectorizer(max_features = None, max_df=0.5, vect=ngram_range(1, 2))
-tfidf = TfidfTransformer(norm= 'l1', use_idf='True')
+count_vectorizer = CountVectorizer(
+    max_features=None, max_df=0.5, ngram_range=(1, 2))
+tfidf_transformer = TfidfTransformer(norm='l1', use_idf='True')
+
+''' Let's transform the lemmatized documents into count vectors '''
+count_vectors = count_vectorizer.fit_transform(
+    df_processed_data['LEMMATIZED_DOC'])
+
+''' Then use those count vectors to generate frequency vectors '''
+frequency_vectors = tfidf_transformer.fit_transform(count_vectors)
 
 ''' Text Topics
     This part will be used to generate unsupervisioned topics using the tokens
@@ -214,6 +222,49 @@ tfidf = TfidfTransformer(norm= 'l1', use_idf='True')
 
 '''
 
-''' Model Train and Evaluation
 
+''' Model Train and Evaluation
 '''
+
+clf = SGDClassifier(alpha=1e-05, max_iter=80, penalty='l2')
+pipeline_simple = Pipeline([
+    ('clf', clf)
+])
+pipeline = Pipeline([
+    ('count_vectorizer', count_vectorizer),
+    ('tfidf_transformer', tfidf_transformer),
+    ('clf', clf)
+])
+''' Let's use cross validation to better evaluate models ''' 
+scores = cross_val_score(
+    pipeline_simple,
+    frequency_vectors,
+    df_processed_data[TARGET_VARIABLE], cv=5)
+print("Mean Accuracy for explicit pipeline: ", scores.mean())
+
+scores = cross_val_score(
+    pipeline,
+    df_processed_data['LEMMATIZED_DOC'],
+    df_processed_data[TARGET_VARIABLE], cv=10)
+print("Mean Accuracy for implicit pipeline: ", scores.mean())
+
+''' Let's evaluate more deeply the best model '''
+X_train, X_test, y_train, y_test = train_test_split(
+    df_processed_data['LEMMATIZED_DOC'],
+    df_processed_data[TARGET_VARIABLE],
+    test_size=0.33, random_state=42)
+
+train1 = X_train.tolist()
+labelsTrain1 = y_train.tolist()
+test1 = X_test.tolist()
+labelsTest1 = y_test.tolist()
+"""  train """
+pipeline.fit(train1, labelsTrain1)
+"""  test """
+preds = pipeline.predict(test1)
+print("accuracy:", accuracy_score(labelsTest1, preds))
+print(
+    classification_report(
+        labelsTest1,
+        preds,
+        target_names=df_processed_data[TARGET_VARIABLE].unique()))

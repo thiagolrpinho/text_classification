@@ -1,5 +1,6 @@
 """
--*- coding: utf-8 -*- Created on Fri 21 2020 @author: Thiago Pinho
+-*- coding: utf-8 -*- Created on Fri 21 2020
+@author: Thiago Pinho
 @colaborators: Thiago Russo, Emmanuel Perotto
 """
 
@@ -273,11 +274,15 @@ print(NLP_SPACY.pipe_names)
 
 lemmatized_doc = []
 tokenized_data = []
+semantics_data = []
 for row in tqdm(preprocessed_text_data):
     doc = NLP_SPACY(row)
     tokenized_data.append(doc)
-    lemmatized_doc.append(" ".join([word.lemma_ if word.tag != "PRONOUN" else "" for word in doc ]))
- 
+    semantics_data.append(" ".join([word.pos_ for word in doc]))
+    lemmatized_doc.append(
+        " ".join(
+            [word.lemma_ if word.tag != "PRONOUN" else "" for word in doc]))
+
 df_data['LEMMATIZED_DOC'] = lemmatized_doc
 
 generate_wordcloud(df_data['LEMMATIZED_DOC'])
@@ -311,6 +316,13 @@ for docs in tokenized_data:
 df_data['ENTITIES'] = entities_lists
 generate_wordcloud(df_data['ENTITIES'])
 print(generate_freq_dist_plot(df_data['ENTITIES']))
+
+# ### Semantics Analysis
+# Let's take a look in the parts of speech presents in the dataset
+
+df_data['SEMANTICS'] = semantics_data
+print(generate_freq_dist_plot(df_data['SEMANTICS']))
+
 
 # ### Removing Entities
 

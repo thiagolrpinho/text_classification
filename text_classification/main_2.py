@@ -4,7 +4,6 @@
 @colaborators: Thiago Russo, Emmanuel Perotto
 """
 
-
 from sklearn.model_selection import cross_val_score, train_test_split
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.feature_extraction.text import TfidfTransformer
@@ -12,7 +11,7 @@ from sklearn.feature_selection import mutual_info_classif
 from sklearn.linear_model import SGDClassifier
 from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import Pipeline
-from sklearn.metrics import accuracy_score, classification_report, plot_confusion_matrix
+from sklearn.metrics import accuracy_score, classification_report
 from sklearn.base import BaseEstimator, TransformerMixin
 import spacy
 from spacy.lang.pt import Portuguese
@@ -29,7 +28,6 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from tqdm.notebook import tqdm
 from preprocessing import generate_freq_dist_plot, generate_wordcloud
-
 
 # ## Constants
 # For better code management, the constants used in this notebook will be

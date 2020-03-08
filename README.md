@@ -1,9 +1,11 @@
 # Text Classification using open source
+
 This repo is used to search and develop a pipeline for
-text classification that can be adapted to different 
+text classification that can be adapted to different
 problems.
 
 ## Python or Jupyter
+
 To run the code as a python script, just go inside the folder text_classification on the same level as docs and run
 
 ````bash

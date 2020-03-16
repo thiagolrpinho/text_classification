@@ -7,6 +7,9 @@ from wordcloud import WordCloud
 from nltk.tokenize import WordPunctTokenizer
 import seaborn as sns
 import matplotlib.pyplot as plt
+import plotly.express as px
+import plotly.graph_objects as go
+
 
 DATASETS_RELATIVE_PATH = "./assets/datasets/"
 
@@ -103,6 +106,7 @@ def generate_wordcloud(df_column, figsize=(20, 8)):
         height=500,
         max_font_size=350,
         collocations=False,
+        background_color="white",
         normalize_plurals=False).generate(text)
     plt.figure(figsize=figsize)
     plt.imshow(wordcloud, interpolation='bilinear')
@@ -110,7 +114,7 @@ def generate_wordcloud(df_column, figsize=(20, 8)):
     plt.show()
 
 
-def generate_freq_dist_plot(df_column, max_words=25):
+def generate_word_distribution(df_column, max_words=25):
     ''' Receives a single a dataframe column and
         plots on screen a bar graph with the most
         frequent tokens and also return those tokens
@@ -120,12 +124,12 @@ def generate_freq_dist_plot(df_column, max_words=25):
     '''
     text = df_column.str.cat(sep=" ")
     words = WordPunctTokenizer().tokenize(text)
-    words_that_apper_the_most = pd.Series(
+    words_that_appear_the_most = pd.Series(
         words).value_counts().nlargest(max_words)
 
     ax = sns.barplot(
-        x=words_that_apper_the_most.index,
-        y=words_that_apper_the_most.values)
+        x=words_that_appear_the_most.index,
+        y=words_that_appear_the_most.values)
     ax.figure.set_size_inches(20, 7)
 
-    return words_that_apper_the_most
+    return words_that_appear_the_most

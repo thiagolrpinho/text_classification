@@ -1,350 +1,362 @@
 #!/usr/bin/env python
 # coding: utf-8
 
+# # Text classification, an SAS EM inspired approach
+
+# ## Summary
+# 
+# 1. Load Data
+# 2. Exploratory analysis
+# 3. Data preparation  
+#     3.1. Renaming the columns  
+#     3.2. Dropping unwanted variable  
+#     3.3. Selecting input variable  
+#     3.4. Dropping missing values  
+#     3.5. Balancing target categories for model input  
+# 4. Text Filter  
+#     4.1. Removing ponctuation and stopwords  
+#     4.2. Lemmatizing and stemming  
+#     4.3. Entity recognition and filtering  
+#     4.4. Part-of-Speech analysis and filtering  
+#     4.5. Analysing filtering results  
+# 5. Text Parser
+#     5.1 Dropping missing entities and POS
+#     5.2 Counting and Vectorizing
+#     5.3 Grisearching Parameters #TODO não sei se esse tópico precisa ser um tópico a parte, eu tentei ligar os textos usando somente texto ao invés de títulos.
+# 6. Topic Modelling
+#     6.1 Generating Topics
+#     6.2 Grisearching Parameters
+#     6.3 Storing topics scores as variables
+# 7. Model Train and Cross-Validation
+#     7.1 Comparing models
+#     7.2 Evaluating winner model
+#     7.3 Confusion Matrix
+
+# In[48]:
+
 
 """
 -*- coding: utf-8 -*- Created on Fri 21 2020
-@author: Thiago Pinho
+@author: Thiago Pinho, Gabriel Vasconcelos
 @colaborators: Thiago Russo, Emmanuel Perotto
 """
-
-
-from sklearn.model_selection import cross_val_score, train_test_split
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.feature_extraction.text import TfidfTransformer
-from sklearn.feature_selection import mutual_info_classif
+#todo limpar algumas libs ai
+from sklearn.model_selection import cross_val_score, train_test_split,\
+    GridSearchCV
+from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer
 from sklearn.linear_model import SGDClassifier
-from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import Pipeline
-from sklearn.metrics import accuracy_score, classification_report, plot_confusion_matrix
-from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.metrics import accuracy_score, classification_report,\
+    plot_confusion_matrix
+from sklearn.naive_bayes import GaussianNB
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.decomposition import LatentDirichletAllocation as LDA
+import pyLDAvis
+from pyLDAvis import sklearn as sklearn_lda
 import spacy
-from spacy.lang.pt import Portuguese
 from spacy.lang.pt.stop_words import STOP_WORDS
-from unidecode import unidecode
-from nltk.tokenize import WordPunctTokenizer
 from nltk.corpus import stopwords
-from nltk.stem import RSLPStemmer
-from string import punctuation
-import re
+from tqdm.notebook import tqdm
 import pandas as pd
 import numpy as np
-import seaborn as sns
 import matplotlib.pyplot as plt
-from tqdm.notebook import tqdm
-from preprocessing import generate_freq_dist_plot, generate_wordcloud
+import warnings
+import plotly.express as px
+import plotly.graph_objects as go
+from plots import plot_term_scatter, plot_categories_distribution,\
+    plot_wordcloud
+warnings.simplefilter("ignore", DeprecationWarning)
 
 
-# ## Constants
 # For better code management, the constants used in this notebook will be listed bellow.
 
+# In[4]:
 
-VECTOR_MODEL_NAME = "pt_core_news_sm"
-RELATIVE_PATH_TO_FOLDER = "./assets/datasets/ribon/"
+
+RELATIVE_PATH_TO_FOLDER = "./assets/datasets/"
 DATA_FILENAME = "feeds_label"
+VECTOR_MODEL_NAME = "pt_core_news_sm"
 NLP_SPACY = spacy.load(VECTOR_MODEL_NAME)
 TARGET_VARIABLE = "LABEL_TRAIN"
 POSSIBLE_TEXT_VARIABLES = ["CONTENT", "TITLE"]
 
 
-# ## Load raw data and start to treat the it's structure
-# We'll have a first look at the raw data and after analysing it's structure we can fix missing values(By dropping or artificially inserting then). We can encode or adjust categorical data if needed, fix column names and also drop unnused colummns.
+# ## 1. Load data
+# 
+# We'll have a look at the raw data and analyse it's structure.
+
+# In[7]:
 
 
-"""  load the dataset """
 relative_path_file = RELATIVE_PATH_TO_FOLDER + DATA_FILENAME + ".csv"
-df_ribon_news = pd.read_csv(relative_path_file)
-print(df_ribon_news.info())
-print()
-print(df_ribon_news['Label_Train'].unique())
+ribon_news_df = pd.read_csv(relative_path_file)
+
+ribon_news_df.head()
 
 
-# ### Results
-# Based on the previous step it's possible to notice two things:
+# ## 2. Exploratory analysis
 # 
-# 1) First is that the column labels are not all uppercase or lowercase. 
+# First we'll check datatypes and number of rows and columns
+
+# In[8]:
+
+
+print("Data info:")
+ribon_news_df.info()
+
+
+# We can see that we have two text variables that we can use as input and some missing values in the 'content' variable.
 # 
-# 2) The categories avaiable to classify are not all in the same case either which could lead to later confunsion on the real number of categories the model should classify.
+# Let's see how the target variable values are distributed
+
+# In[9]:
+
+
+raw_categories_df = plot_categories_distribution(ribon_news_df,
+                                                 'Label_Train', 
+                                                 'id', 
+                                                 'Initial distribution of Categories in the Ribon News dataset')
+
+
+# We can notice two things:
 # 
-# So we will fix by making: 
+# 1. The column labels are not all uppercase or lowercase. 
+# 2. The categories avaiable to classify are not all in the same case either which could lead to later confunsion on the real number of categories the model should classify.
+
+# ## 3. Data preparation
 # 
-# 1) All **column names** will be **uppercase**
+# ### 3.1. Renaming the columns
 # 
-# 2) All **target categories** will also be **uppercase**
+# Let's start uppercasing all column names and target variable values
+
+# In[10]:
 
 
-"""  Preprocessing the dataset names and values """
-df_ribon_news.columns = map(lambda x: str(x).upper(), df_ribon_news.columns)
-""" Converting all labels in TARGET_VARIABLE to uppercase """
-df_ribon_news[TARGET_VARIABLE] = df_ribon_news[TARGET_VARIABLE].str.upper()
-print("Column names are now: ", df_ribon_news.columns.to_list())
-print()
-print(TARGET_VARIABLE + " categories are now: ", df_ribon_news[TARGET_VARIABLE].unique())
+ribon_news_df.columns = map(lambda x: str(x).upper(), ribon_news_df.columns)
+ribon_news_df[TARGET_VARIABLE] = ribon_news_df[TARGET_VARIABLE].str.upper()
+
+ribon_news_df.head()
 
 
-# ### Storing partial progress
-# One of the advantages of jupyter notebook is the possibility of only repeating parts of the code when there is need for it. So let's store our partial progress for more stability and less rework.
+# Now let's the real distribution of categories
+
+# In[11]:
 
 
-"""  Let"s store the data """
-excel_filename = RELATIVE_PATH_TO_FOLDER + DATA_FILENAME + "_treated.xlsx"
+df_categories2 = plot_categories_distribution(ribon_news_df, 
+                                              TARGET_VARIABLE, 
+                                              'ID',
+                                              'Distribution of Categories after preparing the text'
+                                             )
 
 
+# We can see that categories like 'CRIANCAS', 'IDOSOS' and 'FAMILIA' maybe have too few observations to train the model and the 'ECOLOGIA' category has too many observations, which can bias the model. 
+# 
+# Before processing the data, let's store our partial progress for more stability and less rework.
 
-"""  Convert the dataframe to an xlsx file """
-df_ribon_news.to_excel(excel_filename)
-
-print("Stored tread dataset on ", excel_filename)
-
-
-# ## Load and analyse treated data
-# Now we have treated some structural characteristics of the data and some details, let's analyse the data.
-
-
-"""  Load the data for stability """
-df_ribon_news_treated = pd.read_excel(excel_filename, index_col=0)
-print(df_ribon_news_treated.info())
-
-
-# ### Choosing text data and dropping unwanted variables
+# ### 3.2. Dropping unwanted variables
+# 
 # Not all columns available in data will be useful for the label classification.
 
-
-""" In the previous results, we could that are two text variables besides the target: CONTENT and TITLE.
-There's also the numeric variable pick_count which is unrelated to label, so let's add it to a unwanted list """
-unwanted_columns = set(['PICK_COUNT', 'ID'])
-
-""" As CONTENT is empty in two cases let's compare it to title which is not empty in any case """
-compared_columns = set(['CONTENT', 'TITLE'])
-columns_stats = []
-columns_series = []
-for column in compared_columns:
-    column_series = df_ribon_news_treated[column]
-    columns_stats.append((column_series.str.len().mean(), column_series.str.len().std()))
-    columns_series.append(column_series)
-
-for column, stats in zip(compared_columns, columns_stats):
-    mean, std = stats
-    mean = str(int(mean))
-    std = str(int(std))
-    print(
-        "Column " + column + " mean length was " + mean + " and standard deviation was " + std)
+# In[12]:
 
 
-# ### Results
-# As CONTENT is appears to have more data, it could bring better results. But as two rows have this column empty we would have to drop those. One way around it is to oversample the data by using both as text variables.
+preprocessed_data_df = ribon_news_df.drop(['PICK_COUNT', 'ID'], 1)
+preprocessed_data_df.info()
 
 
-unwanted_columns.union(compared_columns)
-wanted_columns = set(df_ribon_news_treated.columns).intersection(unwanted_columns)
-df_preprocessed_data = pd.DataFrame(columns=[TARGET_VARIABLE, "TEXT_VARIABLE"])
-for column in compared_columns:
-    df_labels_texts_variables = df_ribon_news_treated[[TARGET_VARIABLE, column]]
-    df_labels_texts_variables = df_labels_texts_variables.rename(columns={column:"TEXT_VARIABLE"})
-    df_preprocessed_data = df_preprocessed_data.append(df_labels_texts_variables, ignore_index=True)
+# ### 3.3. Selecting input variable
+# 
+# In the previous results, we noticed that are two text variables besides the target: 'CONTENT' and 'TITLE'. As 'CONTENT' is empty in two cases but 'TITLE' is not empty in any case.
+# 
+# Lets analyse their size so we can decide which one is better as our model input.
 
-print(df_preprocessed_data.info())
+# In[13]:
 
 
-# ### Dealing with missing values
+print('Column TITLE mean length is ', int(preprocessed_data_df['TITLE'].str.len().mean()),
+      ' and standard deviation was ', int(preprocessed_data_df['TITLE'].str.len().std())) 
+print('Column CONTENT mean length is ', int(preprocessed_data_df['CONTENT'].str.len().mean()),
+      ' and standard deviation was ', int(preprocessed_data_df['CONTENT'].str.len().std())) 
+
+
+# The variable CONTENT appears to have more data and could bring better results. But as two rows have this column empty we would have to drop those. One way around it is to oversample the data by using both as text variables.
+# 
+
+# In[14]:
+
+
+data_df = pd.concat([
+    preprocessed_data_df[['TITLE', TARGET_VARIABLE]].rename(columns={'TITLE':"TEXT_VARIABLE"}), 
+    preprocessed_data_df[['CONTENT', TARGET_VARIABLE]].rename(columns={'CONTENT':"TEXT_VARIABLE"})
+])
+data_df.info()
+
+
+# ### 3.4. Dropping missing values
+# 
 # As there are some samples that are empty, they'll not be useful to train or to validate the model. 
-# Let's drop them
+
+# In[15]:
 
 
-df_preprocessed_data = df_preprocessed_data.dropna()
-print(df_preprocessed_data.info())
+data_df = data_df.dropna()
+data_df.info()
 
 
-# ### Label distribution, oversampling and undersampling
-# One important step is to analyse how the target categories are distributed. That's useful so we can better partition our data, maybe apply some over or undersampling if it's necessary.
+# Lets see how our dataset looks like now
+
+# In[16]:
 
 
-"""  Let"s see how the labels are distributed """
-data_labels_count = df_preprocessed_data[TARGET_VARIABLE].value_counts()
-data_labels = data_labels_count.index
-average_samples_per_label = data_labels_count.mean()
-standard_deviation_for_labels = data_labels_count.std()
-print(
-    "Mean number of samples for the target variable is: ",
-    average_samples_per_label)
-print(
-    "Standard deviation number of samples for the target variable is: ",
-    standard_deviation_for_labels)
-
-''' Numerical analysis
-    One way to analyse the frequency of certain labels is to notice with
-    they're too afar from the other labels frequencies average. Let's use
-    standard deviation to check it'''
-def is_it_further_than_std_deviations( value ):
-    is_too_much = value > average_samples_per_label + standard_deviation_for_labels
-    is_too_little = value < average_samples_per_label - standard_deviation_for_labels
-    if is_too_much or is_too_little:
-        message = "Warning"
-    else:
-        message = "Okay"
-
-    return message
-
-for i in tqdm(range(0, len(data_labels), 2)):
-    even_indexed_label = data_labels[i]
-    odd_indexed_label = data_labels[i+1]
-
-    print("{0:20}  {1:10} {2:15} {3:20} {4:10} {5:10}".format(
-        even_indexed_label, data_labels_count[even_indexed_label], is_it_further_than_std_deviations(data_labels_count[even_indexed_label]),
-        odd_indexed_label, data_labels_count[odd_indexed_label], is_it_further_than_std_deviations(data_labels_count[odd_indexed_label])))
-
-''' Visual plotting'''
-fig = plt.figure(figsize=(20, 8))
-sns.barplot(
-    x=data_labels_count.index,
-    y=data_labels_count)
-plt.show()
+data_df['ID'] = data_df.index
+df_categories3 = plot_categories_distribution(data_df, 
+                                              TARGET_VARIABLE, 
+                                              'ID',
+                                              'Distribution of categories after oversampling'
+                                             )
 
 
-# ### Results
+# ### 3.5 Balancing target categories for model input
 # 
-# Based on the previous step, we can see the categories **ECOLOGIA** and **SOLIDARIEDADE** have **more than the average added by the standard deviation** which can cause the model to overly recognise those labels patterns and make then too sensitive for those. 
+# One important step is to analyse how the target categories are distributed, so we can better partition our data.
+
+# In[17]:
+
+
+categories_df = data_df[TARGET_VARIABLE].value_counts().reset_index()
+categories_mean = categories_df[TARGET_VARIABLE].mean()
+categories_std = categories_df[TARGET_VARIABLE].std()
+print("Mean number of samples of each category is: ", categories_mean)
+print("Standard deviation number of samples of each category is: ", categories_std)
+
+over_categories = [obs[0] for obs in categories_df.values if obs[1] > categories_mean+categories_std]
+under_categories = [obs[0] for obs in categories_df.values if obs[1] < categories_mean-categories_std]
+print("\nOverrepresented categories:", over_categories)
+print("Underrepresented categories:", under_categories)
+print("PS: The outliers were calculated using the 1 standart deviation")
+
+
+# The categories "ECOLOGIA" and "SOLIDARIEDADE" are overrepresented which may cause the model to overly recognise those labels patterns and make then too sensitive for those. 
 # 
-# On other hand we have the categories **FAMILIA**, **CRIANCAS** and **IDOSOS** with **less than the average subtracted by the standard deviation** which can make the model too specific for those and hardly classify as it.
+# On the other hand we have the categories "FAMILIA", "CRIANCAS" and "IDOSOS" that are under represented, which can make the model too specific for those and hardly classify as it.
 # 
-# Let's oversample the least common labels by grouping then. When our pipeline is finely tunned we can use the grouped labels as input for another pipeline trainned only to discern among those.
-# And also undersample the most common labels by ramdonly select less samples.
+# An easy sollution is to group the least common labels into a single one. When our pipeline is finely tunned we can use the grouped labels as input for another pipeline trained only to discern among those. For the overrepresented labels, a way out is to randomly select just a sample of them.
+
+# In[18]:
 
 
-''' Let's create another dataframe and find which samples will be and how they'll be part of it'''
-data_labels_count = df_preprocessed_data[TARGET_VARIABLE].value_counts()
-data_labels = data_labels_count.index
-under_represented_labels = []
-over_represented_labels = []
-max_number_of_samples = average_samples_per_label + standard_deviation_for_labels
-min_number_of_samples = average_samples_per_label - standard_deviation_for_labels
-for label in tqdm(data_labels):
-    if data_labels_count[label] < min_number_of_samples:
-        under_represented_labels.append(label)
-    elif data_labels_count[label] > max_number_of_samples:
-        over_represented_labels.append(label)
+data_df.loc[data_df[TARGET_VARIABLE].isin(under_categories), TARGET_VARIABLE] = "OTHERS"
 
-unchanged_labels = list(set(data_labels) - set(under_represented_labels) - set(over_represented_labels))
-
-print("Let's check the labels found: ")
-print("Underpresented labels: ", under_represented_labels)
-print("Overrepresented labels: ", over_represented_labels)
-print("Unchanged Labels: ", unchanged_labels)
-
-df_preprocessed_grouped = pd.DataFrame(columns=df_preprocessed_data.columns)
-
-for label in unchanged_labels:
-    unchanged_rows = df_preprocessed_data[df_preprocessed_data[TARGET_VARIABLE] == label]
-    df_preprocessed_grouped = df_preprocessed_grouped.append(unchanged_rows)
-
-''' Now we have found which ones are under represented we'll add them to the new
-    DataFrame and then change the under represented label to SCARCE_GROUP '''
-for label in under_represented_labels:
-    under_represented_rows = df_preprocessed_data[df_preprocessed_data[TARGET_VARIABLE] == label]
-    df_preprocessed_grouped = df_preprocessed_grouped.append(under_represented_rows)
-
-GROUP_TARGET_LABEL = 'SCARCE_GROUP'
-df_preprocessed_grouped = df_preprocessed_grouped.replace(
-    {TARGET_VARIABLE: under_represented_labels}, GROUP_TARGET_LABEL)
-
-""" For the over represented, we'll select some of the samples."""
-for label in over_represented_labels:
-    over_represented_rows = df_preprocessed_data[
-        df_preprocessed_data[TARGET_VARIABLE] == label].sample(int(max_number_of_samples))
-    df_preprocessed_grouped = df_preprocessed_grouped.append(over_represented_rows)
-
-print(df_preprocessed_grouped[TARGET_VARIABLE].value_counts())
-
-"""  Let"s see how the labels are distributed """
-data_labels_count = df_preprocessed_grouped[TARGET_VARIABLE].value_counts()
-data_labels = data_labels_count.index
-fig = plt.figure(figsize=(20, 8))
-sns.barplot(
-    x=data_labels_count.index,
-    y=data_labels_count)
-plt.show()
-print(df_preprocessed_data.info())
+#for category in over_categories:
+top_limit = categories_mean + categories_std
+grouped_data_df = data_df[~data_df[TARGET_VARIABLE].isin(over_categories)]
+for over in over_categories:
+    rejected_obs = int(data_df[TARGET_VARIABLE].value_counts()[over] - top_limit)
+    over_df = data_df[data_df[TARGET_VARIABLE] == over].sample(int(top_limit))
+    grouped_data_df = grouped_data_df.append(over_df)
 
 
-# ### Storing partial progress
+# Let's see the result
+
+# In[19]:
 
 
-excel_filename = RELATIVE_PATH_TO_FOLDER + DATA_FILENAME +    "_treated_grouped.xlsx"
+grouped_data_df['ID'] = grouped_data_df.index
+df_categories4 = plot_categories_distribution(grouped_data_df, 
+                                              'LABEL_TRAIN', 
+                                              'ID',
+                                              'Distribuition of categories after grouping and filtering'
+                                             )
 
 
+# ### 3.7. Visual analysis of pre-processing
 
-"""  Let"s store the  data """
-df_preprocessed_grouped.to_excel(excel_filename)
+# In[20]:
 
 
-# ## Data Partition
-# Now we have treated the data structure and sampling problems. Let's drop unwanted columns.
+fig = go.Figure(data=[
+    go.Bar(name='First dataset (uppercased)', 
+           x=df_categories2['LABEL_TRAIN'], 
+           y=df_categories2['COUNT']
+    ),
+    go.Bar(name='Second dataset (oversampled)', 
+           x=df_categories3['LABEL_TRAIN'], 
+           y=df_categories3['COUNT']
+    ),
+    go.Bar(name='Third dataset (filtered and grouped)', 
+           x=df_categories4['LABEL_TRAIN'], 
+           y=df_categories4['COUNT']
+    )
+])
+
+fig.update_layout(
+    barmode='group',
+    title="Evolution of the dataset during the pre-processing",
+    xaxis_title="Categories",
+    yaxis_title="Number of Articles + Titles"
+)
+
+fig.show()
+
+
+# To better manage the step-by-step of the model evolution, let's store our partial progress
+
+# In[21]:
+
+
+excel_filename = RELATIVE_PATH_TO_FOLDER + DATA_FILENAME + "_treated_grouped.xlsx"
+grouped_data_df.to_excel(excel_filename)
+
+
+# ## 4. Text Filter
+# 
+# Before we train the model, it's necessary to create a bag of words by tokenizing each word, finding their lemmas and discarting some words that could mislead the model.
+# 
+# Let's take a first look at the raw text variable.
+
+# In[22]:
 
 
 """  We then load the data for stability """
-df_data = pd.read_excel(excel_filename, index_col=0)
-print(df_data.head())
+data_df = pd.read_excel(excel_filename, index_col=0)
+data_df.info()
 
 
-# ## Text Filter(Preprocessing)
-# 
-# Before we train the model, it's necessary to tokenize words, find their lemmas and discard some words that could mislead the model.
-# 
-# Let's take a first look at the text variable.
+# In[23]:
 
 
 text_variable = 'TEXT_VARIABLE'
-raw_text_column = df_data[text_variable]
-generate_wordcloud(raw_text_column)
-print(generate_freq_dist_plot(raw_text_column))
+df_terms1 = plot_term_scatter(data_df, text_variable, 'Top-100 terms in raw data')
 
 
-# ### Symbols and stopwords
+# ### 4.1. Removing ponctuation and stopwords
 # 
-# As we can see, we have a lot of tokens from text variable being symbols or words that don't have by themselves much meaning. Let's fix that.
-# We can also strip trailing spaces and remove multiple spaces.
+# As we can see, we have a lot of tokens from text variable being ponctuations or words that don't have by themselves much meaning. 
+# 
+# We're going to load a built-in stopwords list to remove these unnecessary tokens.
+
+# In[24]:
 
 
-stopwords_set = set(STOP_WORDS).union(set(stopwords.words('portuguese'))).union(set(['anos', 'ano', 'dia', 'dias']))
-stopword_pattern = r'\b(?:{})\b'.format(r'|'.join(stopwords_set))
-symbols_pattern = r'(?:[{}]|[^\w\s])'.format(punctuation)
-space_pattern = r'\s\s+'
-number_pattern = r'\d'
+stopwords_set = set(STOP_WORDS).union(set(stopwords.words('portuguese')))                               .union(set(['anos', 'ano', 'dia', 'dias']))
+    
 print("This is the stopword list: ", sorted(list(stopwords_set)))
-print("This is the number pattern:", number_pattern)
-print("This is the symbols pattern: ", symbols_pattern)
-print("This is the space pattern:", space_pattern)
 
 
+# To improve performance, we're going to use the loop in the next step to effectively remove the stopwords from text
 
-''' Processing text on caracteres level'''
-df_data['PREPROCESSED_TEXT'] = df_data[text_variable]
-df_data['PREPROCESSED_TEXT'] = df_data['PREPROCESSED_TEXT'].str.replace(
-    number_pattern, " ")
-df_data['PREPROCESSED_TEXT'] = df_data['PREPROCESSED_TEXT'].str.replace(
-    stopword_pattern, " ", case=False)
-df_data['PREPROCESSED_TEXT'] = df_data['PREPROCESSED_TEXT'].str.replace(
-    symbols_pattern, " ")
-df_data['PREPROCESSED_TEXT'] = df_data['PREPROCESSED_TEXT'].str.replace(
-    space_pattern, " ")
-df_data['PREPROCESSED_TEXT'] = df_data['PREPROCESSED_TEXT'].str.strip()
-generate_wordcloud(df_data['PREPROCESSED_TEXT'])
-print(generate_freq_dist_plot(df_data['PREPROCESSED_TEXT']))
-
-
-# ### Results
-# Now the most common words are way more expressive.
-
-# ### Lemmatizing and stemming
+# ### 4.2. Lemmatizing and stemming
 # 
+# #todo explicar o role
+
+# In[25]:
 
 
-preprocessed_text_data = df_data['PREPROCESSED_TEXT'].to_list()
 ''' Not all variables are being undestood as strings so we have to force it'''
-
-sentencizer = NLP_SPACY.create_pipe('sentencizer')
+preprocessed_text_data = data_df[text_variable].to_list()
 ''' Create the pipeline 'sentencizer' component '''
-
+sentencizer = NLP_SPACY.create_pipe('sentencizer')
 try:
     ''' We then add the component to the pipeline if we hadn't done before '''
     NLP_SPACY.add_pipe(sentencizer, before='parser')
@@ -360,35 +372,34 @@ normalized_doc = []
 raw_doc = []
 for row in tqdm(preprocessed_text_data):
     doc = NLP_SPACY(row)
-    tokenized_data.append(doc)
-    raw_doc.append(
-        " ".join(
-            [word.text for word in doc]))
-    lemmatized_doc.append(
-        " ".join(
-            [word.lemma_ for word in doc]))
-    normalized_doc.append(
-        " ".join(
-            [word.norm_ for word in doc]))
-    
-df_data['RAW_DOC'] = raw_doc
-df_data['NORMALIZED_DOC'] = normalized_doc
-df_data['LEMMATIZED_DOC'] = lemmatized_doc
+    preprocessed_doc = [token for token in doc if token.is_alpha and not token.norm_ in stopwords_set]
+    tokenized_data.append(preprocessed_doc)
+    raw_doc.append(" ".join([word.text for word in preprocessed_doc]))
+    lemmatized_doc.append(" ".join([word.lemma_ for word in preprocessed_doc]))
+    normalized_doc.append(" ".join([word.norm_ for word in preprocessed_doc]))
 
-print("Documents without lemmatization")
-print(generate_freq_dist_plot(df_data['RAW_DOC']))
-generate_wordcloud(df_data['RAW_DOC'])
-print("Documents with minor lemmatization")
-print(generate_freq_dist_plot(df_data['NORMALIZED_DOC']))
-generate_wordcloud(df_data['NORMALIZED_DOC'])
-print("Documents with full lemmatization")
-print(generate_freq_dist_plot(df_data['LEMMATIZED_DOC']))
-generate_wordcloud(df_data['LEMMATIZED_DOC'])
+data_df['RAW_DOC'] = raw_doc
+data_df['NORMALIZED_DOC'] = normalized_doc
+data_df['LEMMATIZED_DOC'] = lemmatized_doc
+
+data_df.head()
 
 
-# ### Entity Recognition
+# Visual plotting of the top-100 terms in raw text, normalized text and lemmatized text, respectively.
+
+# In[26]:
+
+
+'''Visual plotting of terms pre-processing'''
+df_terms2 = plot_term_scatter(data_df, 'RAW_DOC', 'Top-100 terms of tokenized data without lemmatizaton')
+df_terms3 = plot_term_scatter(data_df, 'NORMALIZED_DOC', 'Top-100 terms of normalized data with minor lemmatization')
+df_terms4 = plot_term_scatter(data_df, 'LEMMATIZED_DOC', 'Top-100 terms of with full lemmatization')
+
+
+# ### 4.3. Entity recognition and filtering
+# 
 # Some parts of speech may mislead the model associating classes to certain entities that are not really related to the categories.
-# The NER model(spacy portuguese) we are using uses the following labels:
+# The NER model (spacy portuguese) we are using uses the following labels:
 # 
 # | TYPE | DESCRIPTION |
 # |------|-------------------------------------------------------------------------------------------------------------------------------------------|
@@ -397,145 +408,313 @@ generate_wordcloud(df_data['LEMMATIZED_DOC'])
 # | ORG | Named corporate, governmental, or other organizational entity. |
 # | MISC | Miscellaneous entities, e.g. events, nationalities, products or works of art. |
 # 
-# Let's take a look at the named persons or families
+# Let's take a look at all entities present in the text
+
+# In[27]:
 
 
-''' First we take a look at the found entities'''
-entities_lists = []
+entities_obs = []
+for doc in tokenized_data:
+    for token in doc:
+        if token.ent_type_:
+            entities_obs.append((token.text, token.ent_type_))
+
+entities_df = pd.DataFrame(entities_obs, columns=['entity_text', 'entity_type'])
+entities_df['id'] = entities_df.index
+grouped_entities_df = (entities_df.groupby(['entity_text', 'entity_type']).count()
+                                                                         .reset_index()
+                                                                         .rename(columns={'id': 'count'})
+                                                                         .sort_values('count', ascending=False)
+                                                                         .head(100))
+                
+fig = px.treemap(grouped_entities_df, 
+                 path=['entity_type', 'entity_text'], 
+                 values='count', 
+                 title='Top-50 entities present in text grouped by type')
+fig.show()
+entity_type_df = grouped_entities_df['entity_type'].value_counts().reset_index()
+
+fig = px.pie(entity_type_df, values='entity_type', names='index', title='Entity type frequency')
+fig.update_traces(textposition='inside', textinfo='percent+label')
+fig.show()
+
+
+# #todo explicar porque removemos pessoas e organizações
+
+# In[28]:
+
+
+processed_tokenized_data = []
+processed_doc_text = []
+entities_obs = []
 entity_unwanted_types = set(['PER', 'ORG'])
 
-for docs in tokenized_data:
+for doc in tokenized_data:
     entities_text = ""
-    for entity in docs.ents:
-        if entity.label_ in entity_unwanted_types:
-            entities_text += " " + entity.text
-    entities_text = entities_text.strip()
-    entities_lists.append(entities_text)
-            
-df_data['ENTITIES'] = entities_lists
-generate_wordcloud(df_data['ENTITIES'])
-print(generate_freq_dist_plot(df_data['ENTITIES']))
-
-
-# ### Removing Entities
-
-
-entities_set = set()
-entities_set = set([ word for word_list in list(map(list, df_data['ENTITIES'].str.split(" ")))
-                            for word in word_list ])
-entities_set.remove("")
-entities_pattern = r'\b(?:{})\b'.format('|'.join(entities_set)) 
+    processed_doc = []
+    for token in doc:
+        if not token.ent_type_:
+            processed_doc.append(token)
+        elif not token.ent_type_ in entity_unwanted_types:
+            processed_doc.append(token)
+            entities_obs.append((token.text, token.ent_type_))
+        
+    processed_tokenized_data.append(processed_doc)
+    processed_doc_text.append(" ".join([word.norm_ for word in processed_doc ]))
 
 ''' Processing text on entity level'''
-df_data['PROCESSED_DOC'] = df_data['NORMALIZED_DOC'].str.replace(entities_pattern, " ")
-generate_wordcloud(df_data['PROCESSED_DOC'])
-print(generate_freq_dist_plot(df_data['PROCESSED_DOC']))
+data_df['PROCESSED_DOC'] = processed_doc_text
+data_df.head()
 
 
-# ### POS Analysis
+# Visual analysis of the remaining entities
+
+# In[29]:
+
+
+entities_df = pd.DataFrame(entities_obs, columns=['entity_text', 'entity_type'])
+entities_df['id'] = entities_df.index
+grouped_entities_df = (entities_df.groupby(['entity_text', 'entity_type']).count()
+                                                                         .reset_index()
+                                                                         .rename(columns={'id': 'count'})
+                                                                         .sort_values('count', ascending=False)
+                                                                         .head(100))
+fig = px.treemap(grouped_entities_df, 
+                 path=['entity_type', 'entity_text'], 
+                 values='count', 
+                 title='Top-50 entities present in text grouped by type after filtering')
+fig.show()
+
+entity_type_df = grouped_entities_df['entity_type'].value_counts().reset_index()
+fig = px.pie(entity_type_df, values='entity_type', names='index', title='Entity type frequency after filtering')
+fig.update_traces(textposition='inside', textinfo='percent+label')
+fig.show()
+
+
+# ### 4.4 Part-of-Speech analysis and filtering
 # Let's take a look in the parts of speech presents in the dataset
 
-
-semantics_data = []
-for doc in tokenized_data:
-    semantics_data.append(" ".join([word.pos_ for word in doc]))
-
-df_data['SEMANTICS'] = semantics_data
-print(generate_freq_dist_plot(df_data['SEMANTICS']))
+# In[30]:
 
 
+token_obs = []
+for doc in processed_tokenized_data:
+    for token in doc:
+        token_obs.append((token.norm_, token.pos_))
 
-ALLOWED_POS = set(["PROPN", "NOUN", "ADV", "ADJ", "VERB"])
+token_df = pd.DataFrame(token_obs)
+token_df.columns = ['token', 'pos']
+token_df['id'] = token_df.index
 
-unwanted_pos_text = []
-for doc in tokenized_data:
-    unwanted_pos_text.append(
-        " ".join(
-            [word.lemma_ if not str(word.pos_) in ALLOWED_POS else "" for word in doc]))
-    
-df_data['UNWANTED_POS'] = unwanted_pos_text
-generate_wordcloud(df_data['UNWANTED_POS'])
-print(generate_freq_dist_plot(df_data['UNWANTED_POS']))
+''' Plotting token grouped by POS treemap '''
+grouped_token_df = (token_df.groupby(['token', 'pos']).count()
+                                                     .reset_index()
+                                                     .rename(columns={'id': 'count'})
+                                                     .sort_values('count', ascending=False)
+                                                     .head(100))
+
+fig = px.treemap(grouped_token_df, 
+                 path=['pos', 'token'], 
+                 values='count', 
+                 title='Top-100 tokens present in text grouped by Part-of-Speech')
+fig.show()
+
+''' Plotting POS bar chart '''
+pos_df = token_df.groupby('pos').count().reset_index().rename(columns={'token':'count'})
+
+fig = px.bar(pos_df, x='pos', y='count', text='count', title="Part-of-Speech type frequency")
+fig.update_layout(xaxis_categoryorder = 'total descending')
+fig.update_traces(texttemplate='%{text:.2s}', textposition='outside')
+fig.show()
 
 
-# ### Removing POS
+# #todo explicar grafico acima e a escolha de POS, fazer uma tebela do significado das siglas (parecido com as entidades ou um link pra doc do spacy)
+# 
+# Here is a wordcloud showing a sample of not relevant words to the text classification that are present in our text variable.
+
+# In[31]:
 
 
-ALLOWED_POS = set(["PROPN", "NOUN", "ADV", "ADJ", "VERB"])
+token_df['id'] = token_df.index
+grouped_token_df = token_df.groupby(['token', 'pos']).count().reset_index().rename(columns={'id': 'count'})
+
+plot_wordcloud(grouped_token_df[~grouped_token_df['pos'].isin(set(["PROPN", "NOUN", "ADV", "ADJ", "VERB"]))]['token'])
+
+
+# Now we're going to remove them, only allowing proper nouns, nouns, adjectives, adverbs and verb to present in our text variable.
+
+# In[32]:
+
+
+allowed_pos_set = set(["PROPN", "NOUN", "ADV", "ADJ", "VERB"])
 
 processed_doc = []
-for doc in tokenized_data:
-    processed_doc.append(
-        " ".join(
-            [word.norm_ if str(word.pos_) in ALLOWED_POS else "" for word in doc]))
+filtered_token_obs = []
+for doc in processed_tokenized_data:
+    doc_tokens = [word for word in doc if str(word.pos_) in allowed_pos_set]
+    filtered_token_obs.append(doc_tokens)
+    processed_doc.append(" ".join(token.norm_ for token in doc_tokens))
 
-df_data['PROCESSED_DOC'] = processed_doc
-''' Processing text on entity level again '''
-df_data['PROCESSED_DOC'] = df_data['PROCESSED_DOC'].str.replace(entities_pattern, " ")
-generate_wordcloud(df_data['PROCESSED_DOC'])
-print(generate_freq_dist_plot(df_data['PROCESSED_DOC']))
-
+data_df['PROCESSED_DOC'] = processed_doc
+data_df['TOKENS'] = filtered_token_obs
+data_df.head()
 
 
-""" Removing extra spaces originated from processing """
-df_data['PROCESSED_DOC'] = df_data['PROCESSED_DOC'].str.replace(space_pattern, " ").str.strip()
-df_data['UNWANTED_POS'] = df_data['UNWANTED_POS'].str.replace(space_pattern, " ").str.strip()
+# Removing extra spaces originated from the removal of tokens
+
+# In[33]:
 
 
-# ### Viewing the most common words for each label
+space_pattern = r'\s\s+'
+data_df['PROCESSED_DOC'] = data_df['PROCESSED_DOC'].str.replace(space_pattern, " ").str.strip()
 
 
-target_labels = df_data[TARGET_VARIABLE].unique()
+# Now let's have a look in the tokens after filtering the unwanted POS
 
-for label in target_labels:
-    words_for_label = df_data[df_data[TARGET_VARIABLE] == label]
-    print("Label: ", label)
-    print(generate_freq_dist_plot(words_for_label['PROCESSED_DOC']))
-    generate_wordcloud(df_data['PROCESSED_DOC'])
+# In[34]:
 
 
-# ### Storing partial progress
+token_obs = []
+for doc in filtered_token_obs:
+    for token in doc:
+        token_obs.append((token.norm_, token.pos_))
+
+token_df = pd.DataFrame(token_obs)
+token_df.columns = ['token', 'pos']
+token_df['id'] = token_df.index
+
+''' Plotting token grouped by POS treemap '''
+grouped_token_df = (token_df.groupby(['token', 'pos']).count()
+                                                     .reset_index()
+                                                     .rename(columns={'id': 'count'})
+                                                     .sort_values('count', ascending=False)
+                                                     .head(100))
+
+fig = px.treemap(grouped_token_df, 
+                 path=['pos', 'token'], 
+                 values='count', 
+                 title='Top-100 tokens present in text grouped by Part-of-Speech after filtering')
+fig.show()
+
+''' Plotting POS bar chart '''
+pos_df = token_df.groupby('pos').count().reset_index().rename(columns={'token':'count'})
+
+fig = px.bar(pos_df, x='pos', y='count', text='count', title="Part-of-Speech type frequency after filtering")
+fig.update_layout(xaxis_categoryorder = 'total descending')
+fig.update_traces(texttemplate='%{text:.2s}', textposition='outside')
+fig.show()
 
 
-"""  Let"s store the data """
-excel_filename = RELATIVE_PATH_TO_FOLDER + DATA_FILENAME +    "_processed_data.xlsx"
+# ### 4.5. Analysing filtering results
+# 
+# Now that we filtered every unwanted stopwords, entity and POS of the orginal text, let's see the most common words for each label and try to check if they make sense.
+
+# In[35]:
 
 
+category_tokens_obs_df = data_df.groupby('LABEL_TRAIN')['TOKENS'].sum().reset_index()
 
-df_data.to_excel(excel_filename)
+category_tokens_df = category_tokens_obs_df.explode('TOKENS')
+category_tokens_df.reset_index(drop=True, inplace=True)
+category_tokens_df['ID'] = category_tokens_df.index
+
+category_tokens_df['TOKENS'] = category_tokens_df['TOKENS'].map(lambda token: token.norm_)
+
+grouped_category_tokens_df = (category_tokens_df.groupby(['LABEL_TRAIN', 'TOKENS']).count()
+                                                                                   .reset_index()
+                                                                                   .rename(columns={'ID': 'COUNT'})
+                                                                                   .sort_values('COUNT', ascending=False))
+
+sampled_category_tokens_df = pd.DataFrame()
+for category in grouped_category_tokens_df['LABEL_TRAIN'].unique():
+    sampled_category_tokens_df = sampled_category_tokens_df.append(
+        grouped_category_tokens_df[grouped_category_tokens_df['LABEL_TRAIN']  == category].nlargest(10, 'COUNT')
+    )
+
+fig = px.treemap(sampled_category_tokens_df, 
+                 path=['LABEL_TRAIN', 'TOKENS'], 
+                 values='COUNT', 
+                 title='Top-10 tokens present in each category')
+fig.show()
 
 
-#  ## Text Parser(Counting and vectorizing)
-#  Now we have clear tokens we can measure how much they affect the outcome prediction and how many of them exist in each sample.
+# Now that we finished our filtering, let's store our partial progress
+
+# In[36]:
 
 
-"""  We then load the data for stability """
-df_processed_data = pd.read_excel(excel_filename, index_col=0)
-print(df_processed_data.info())
+excel_filename = RELATIVE_PATH_TO_FOLDER + DATA_FILENAME + "_processed_data.xlsx"
+data_df.to_excel(excel_filename)
 
 
-# ### Dealing with missing values
+#  ## 5. Text Parser
+#  
+#  Now we have clear text variables we can measure how much they influence the outcome prediction and how many of them exist in each sample.
+
+# In[37]:
+
+
+processed_data_df = pd.read_excel(excel_filename, index_col=0)
+print(data_df.info())
+
+
+# ### 5.1. Dropping missing Entities and POS
 # As there are some samples without content, they'll not be useful to train or to validate the model. 
 # Hapilly they're not many so let's drop them.
 
-
-missing_variables = ['ENTITIES', 'UNWANTED_POS']
-df_processed_data = df_processed_data.drop(columns=missing_variables).dropna()
-print(df_processed_data.info())
+# In[38]:
 
 
-# ### Choosing best parameters for Counting and Vectorizing
+processed_data_df = processed_data_df.drop(columns=['TOKENS']).dropna()
+print(processed_data_df.info())
+
+
+# ### 5.2. Counting and Vectorizing
+# 
+# As our model works only with numerical data we need to convert the string tokens to numeric equivalents which are called features. This part is responsible to give weights to important tokens and remove weight for unwanted ones or those who can be misguiding.
+# Let's first instantiate the models used for this process. 
+# CountVectorizer generates weights relative to how many times a word or a combination or words(ngrams) appear no matter how big is the document.
+# While TfidfTransformer makes it proportional to the size of the document. The parm "use_idf" highlights the less
+# frequents ones because they can be more informative than other words that appear a lot.
+
+# In[54]:
+
+
+''' Best parameter using GridSearch (CV score=0.535): 
+{'clf__alpha': 1e-05, 'clf__max_iter': 80, 'clf__penalty': 'l2', 'tfidf__norm': 'l1',
+'tfidf__smooth_idf': False, 'tfidf__sublinear_tf': True, 'tfidf__use_idf': True,
+'vect__max_df': 0.6000000000000001, 'vect__max_features': None, 'vect__min_df': 0.0007,
+'vect__ngram_range': (1, 2)}
+Those were obtained on the next code block.
+'''
+count_vectorizer = CountVectorizer(
+    max_features=None, min_df=0.0007, max_df=0.6, ngram_range=(1, 2))
+tfidf_transformer = TfidfTransformer(norm='l1', use_idf=True, sublinear_tf=True)
+
+''' Let's transform the lemmatized documents into count vectors '''
+count_vectors = count_vectorizer.fit_transform(
+    processed_data_df['PROCESSED_DOC'])
+
+''' Then use those count vectors to generate frequency vectors '''
+frequency_vectors = tfidf_transformer.fit_transform(count_vectors)
+
+print(processed_data_df['PROCESSED_DOC'].to_list()[0])
+print(count_vectors[0]) #TODO talvez tenha uma forma mais informativa de mostrar essa matriz esparsa
+print(frequency_vectors[0]) #TODO Dessa também, o objetivo é mostrar que os tokens 
+
+
+# To find which params where most adequate to vectorize our data we can use a gridsearch algorithm. It brute force tests all the choosen pipeline with the search params so if we have 2 params for one model and 3 for other, it'll test 6 different pipelines and choose the one with best accuracy results using cross-validation. This consumes a lot of time so we use a boolean to choose when to control when to execute this part.
+
+# In[40]:
 
 
 is_gridsearching = False
 if is_gridsearching:
-    from sklearn.metrics import make_scorer
-    from sklearn.metrics import accuracy_score
-
     search_count_vectorizer = CountVectorizer()
     search_tfidf_transformer = TfidfTransformer()
     clf = SGDClassifier(alpha=1e-05, max_iter=80, penalty='l2')
-
+    
+    ''' Those are all the params values that will be tested.'''
     search_params = {
         'vect__min_df': np.arange(0, 0.001, 0.0003),
         'vect__max_df': np.arange(0.2, 0.9, 0.3),
@@ -545,7 +724,7 @@ if is_gridsearching:
         'tfidf__use_idf': [False, True],
         'tfidf__smooth_idf': [False],
         'tfidf__sublinear_tf' : [False, True]}
-
+    
     search_pipeline = Pipeline([
         ('vect', search_count_vectorizer),
         ('tfidf', search_tfidf_transformer),
@@ -554,59 +733,139 @@ if is_gridsearching:
 
     gs = GridSearchCV(search_pipeline,
                       param_grid=search_params, cv=5)
-    gs.fit(df_data['PROCESSED_DOC'].values, df_data[TARGET_VARIABLE])
+    gs.fit(data_df['PROCESSED_DOC'].values, data_df[TARGET_VARIABLE])
     results = gs.cv_results_
-    print(results)
+    print(gs.best_params_)
 
 
+# Now we have choosen the best parameters and already vectorized our data we can take a look on what combinations of tokens did the vectorizer generated as features. This is a good way to be sure the tokenization worked as planned.
 
-print(gs.best_params_)
-
-
-
-''' Best parameter using GridSearch (CV score=0.535):
-{'clf__alpha': 1e-05, 'clf__max_iter': 80, 'clf__penalty': 'l2', 'tfidf__norm': 'l1',
-'tfidf__smooth_idf': False, 'tfidf__sublinear_tf': True, 'tfidf__use_idf': True,
-'vect__max_df': 0.6000000000000001, 'vect__max_features': None, 'vect__min_df': 0.0007,
-'vect__ngram_range': (1, 2)}
-'''
-''' Text Parser
-    This part is responsible to give weights to important tokens and remove
-    weight for unwanted ones or those who can be misguiding.
-    - Frequency Counter
-    - Id-IdF Counter
-'''
-count_vectorizer = CountVectorizer(
-    max_features=None, min_df=0.0007, max_df=0.6, ngram_range=(1, 2))
-tfidf_transformer = TfidfTransformer(norm='l1', use_idf=True, sublinear_tf=True)
-
-''' Let's transform the lemmatized documents into count vectors '''
-count_vectors = count_vectorizer.fit_transform(
-    df_processed_data['PROCESSED_DOC'])
-
-''' Then use those count vectors to generate frequency vectors '''
-frequency_vectors = tfidf_transformer.fit_transform(count_vectors)
-
-print(count_vectors[0])
-print(frequency_vectors[0])
-
-
-
-''' Let's transform the lemmatized documents into count vectors '''
-count_vectorizer = CountVectorizer(
-    max_features=None, min_df=0.0007, max_df=0.6000000000000001, ngram_range=(1, 2))
-count_vectors = count_vectorizer.fit_transform(
-    df_processed_data['PROCESSED_DOC'])
-
-mutual_info_vector = mutual_info_classif(count_vectors, df_processed_data[TARGET_VARIABLE]) 
-print(mutual_info_vector)
-
+# In[41]:
 
 
 print(count_vectorizer.get_feature_names())
 
 
-# ### Model Train and Cross-Validation
+# #TODO Eu queria mostrar quais combinações de tokens os vetorizadores usaram como features.
+
+# ## 6. Topic Modelling
+# One way to organize those feature vectors is to search for unsupervisionised patterns inside data to form topics and then use those topics to classify.
+
+# ### 6.1. Generating topics
+
+# In[42]:
+
+
+num_topics = 30
+number_words = 10
+''' Creating and fit the LDA model using the count_vectors generated before '''
+lda = LDA(n_components=num_topics, max_iter = 20, n_jobs=-1)
+topics_vectors = lda.fit_transform(count_vectors)
+''' Printing the topics found by the LDA model '''
+print("Topics found via LDA:")
+
+words = count_vectorizer.get_feature_names()
+for topic_idx, topic in enumerate(lda.components_):
+    print("\nTopic #%d:" % topic_idx)
+    print(" ".join([words[i]
+                    for i in topic.argsort()[:-number_words - 1:-1]]))
+
+
+# Let's see how the topics found are related to each other
+
+# In[49]:
+
+
+LDAvis_prepared = sklearn_lda.prepare(lda, count_vectors, count_vectorizer)
+
+pyLDAvis.display(LDAvis_prepared)
+
+
+# ### 6.2. GridSearching best params
+# 
+# Same as before, we can search for the best params to generate the topics using gridsearch. 
+
+# In[50]:
+
+
+is_gridsearching = False
+if is_gridsearching:
+    search_count_vectorizer = CountVectorizer(
+        max_features=None, min_df=0.0007, max_df=0.6, ngram_range=(1, 2))
+    search_tfidf_transformer = TfidfTransformer(norm='l1', use_idf=True, sublinear_tf=True)
+    lda = LDA(n_jobs=-1)
+    gnb = GaussianNB()
+
+    search_params = {
+        'lda__max_iter': [20],
+        'lda__n_components': [60]
+    } 
+
+    search_pipeline = Pipeline([
+        ('vect', search_count_vectorizer),
+        ('tfidf', search_tfidf_transformer),
+        ('lda', lda),
+        ('gnb', gnb)
+    ])
+
+    gs = GridSearchCV(search_pipeline,
+                      param_grid=search_params, cv=5)
+    gs.fit(processed_data_df['PROCESSED_DOC'].values, processed_data_df[TARGET_VARIABLE])
+    print(gs.best_params_)
+
+
+# ### 6.3. Storing topics scores as variables
+
+# In[55]:
+
+
+''' We'll need the same number of lists as the number of topics  '''
+topics_scores = [[] for i in range(num_topics)]
+
+''' We then extract each row score to different columns '''
+for doc_topics in topics_vectors:
+    for i in range(0, num_topics):
+        if doc_topics[i]:
+            topics_scores[i].append(doc_topics[i])
+        else: 
+            topics_scores[i].append(0)
+
+
+''' And store then in the data as variables for their respectives rows'''
+topics_skl_columns = []
+for i in range(0, num_topics):
+    column_name = 'TOPIC_SKL_' + str(i)
+    topics_skl_columns.append(column_name)
+    processed_data_df[column_name] = topics_scores[i]
+
+print(processed_data_df.info())
+
+
+# ## 7. Model Train and Cross-Validation
+# Let's try the analysis with topic modeling or using the vectorized features frequencies. 
+# ### 7.1 Comparing models
+# #### Topic Modeling
+
+# In[56]:
+
+
+classifier = RandomForestClassifier(max_depth=4, random_state=0)
+
+pipeline_simple = Pipeline([
+    ('classifier', classifier)
+])
+
+''' Let's use cross validation to better evaluate models ''' 
+scores = cross_val_score(
+    pipeline_simple,
+    processed_data_df[topics_skl_columns],
+    processed_data_df[TARGET_VARIABLE], cv=5)
+print("Mean accuracy for explicit pipeline: ", scores.mean()) #TODO uma forma de visualizar esse resultado melhor que um print
+
+
+# #### Features Vectors Inversed Frequencies
+
+# In[58]:
 
 
 count_vectorizer = CountVectorizer(
@@ -614,48 +873,48 @@ count_vectorizer = CountVectorizer(
 tfidf_transformer = TfidfTransformer(norm='l1', use_idf=True, sublinear_tf=True)
 clf = SGDClassifier(alpha=1e-05, max_iter=80, penalty='l2')
 
-pipeline_simple = Pipeline([
-    ('clf', clf)
-])
+''' Encapsuling components in pipeline '''
 pipeline = Pipeline([
     ('count_vectorizer', count_vectorizer),
     ('tfidf_transformer', tfidf_transformer),
     ('clf', clf)
 ])
 
-''' Let's use cross validation to better evaluate models ''' 
-scores = cross_val_score(
-    pipeline_simple,
-    frequency_vectors,
-    df_processed_data[TARGET_VARIABLE], cv=10)
-print("Mean accuracy for explicit pipeline: ", scores.mean())
-
 scores = cross_val_score(
     pipeline,
-    df_processed_data['PROCESSED_DOC'],
-    df_processed_data[TARGET_VARIABLE], cv=10)
-print("Mean accuracy for implicit pipeline: ", scores.mean())
+    processed_data_df['PROCESSED_DOC'],
+    processed_data_df[TARGET_VARIABLE], cv=10)
+print("Mean accuracy for pipeline: ", scores.mean())
 
 
-# ### Evaluating the best model
+# ### 7.2 Evaluating the winner model
+
+# In[61]:
 
 
 ''' Let's evaluate more deeply the best model '''
 X_train, X_test, y_train, y_test = train_test_split(
-    df_processed_data['PROCESSED_DOC'],
-    df_processed_data[TARGET_VARIABLE],
+     processed_data_df['PROCESSED_DOC'].to_list(),
+    processed_data_df[TARGET_VARIABLE].to_list(),
     test_size=0.33, random_state=42)
 
+''' First we need to instantiate some components again to avoid overfit'''
+count_vectorizer = CountVectorizer(
+    max_features=None, min_df=0.0007, max_df=0.6000000000000001, ngram_range=(1, 2))
+tfidf_transformer = TfidfTransformer(norm='l1', use_idf=True, sublinear_tf=True)
+clf = SGDClassifier(alpha=1e-05, max_iter=80, penalty='l2')
+
+''' Encapsuling components in pipeline '''
 pipeline = Pipeline([
     ('count_vectorizer', count_vectorizer),
     ('tfidf_transformer', tfidf_transformer),
     ('clf', clf)
 ])
 
-train1 = X_train.tolist()
-labelsTrain1 = y_train.tolist()
-test1 = X_test.tolist()
-labelsTest1 = y_test.tolist()
+train1 = X_train
+labelsTrain1 = y_train
+test1 = X_test
+labelsTest1 = y_test
 """  train """
 pipeline.fit(train1, labelsTrain1)
 """  test """
@@ -665,16 +924,18 @@ print(
     classification_report(
         labelsTest1,
         preds,
-        target_names=df_processed_data[TARGET_VARIABLE].unique()))
+        target_names=processed_data_df[TARGET_VARIABLE].unique()))
 
 
-# ### Better visualising model classification
+# ### 7.3 Confusion Matrix
+
+# In[63]:
 
 
 fig = plt.figure(figsize=(20, 20))
 axes = plt.axes()
 
-print(plot_confusion_matrix(pipeline, preds, labelsTest1, cmap='hot', ax=axes))
+plot_confusion_matrix(pipeline, test1, labelsTest1, cmap='hot', ax=axes)
 
 
 # 
